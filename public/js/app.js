@@ -1,162 +1,350 @@
-if ( ! Detector.webgl ) {
-    Detector.addGetWebGLMessage();
-    document.getElementById( 'container' ).innerHTML = "";
+/**
+ * @author troffmo5 / http://github.com/troffmo5
+ *
+ * Google Street View viewer for the Oculus Rift
+ */
+
+// Parameters
+// ----------------------------------------------
+var QUALITY = 3;
+var DEFAULT_LOCATION = {lat: 41.902381, lng: 12.465522};
+var USE_TRACKER = false;
+var DEADZONE = 0.2;
+var SHOW_SETTINGS = true;
+var NAV_DELTA = 45;
+var FAR = 1000;
+var USE_DEPTH = true;
+var WORLD_FACTOR = 1.0;
+
+// Globals
+// ----------------------------------------------
+var WIDTH, HEIGHT;
+var currHeading = 0;
+var centerHeading = 0;
+var navList = [];
+
+var headingVector = new THREE.Euler();
+var gamepadMoveVector = new THREE.Vector3();
+
+// Utility function
+// ----------------------------------------------
+function angleRangeDeg(angle) {
+    angle %= 360;
+    if (angle < 0) angle += 360;
+    return angle;
 }
-var container, stats, effect, oculusControl;
-var camera, scene, renderer;
-var mesh;
-var worldWidth = 128, worldDepth = 128,
-    worldHalfWidth = worldWidth / 2, worldHalfDepth = worldDepth / 2,
-    data = generateHeight( worldWidth, worldDepth );
-var clock = new THREE.Clock();
 
-init();
-animate();
+function angleRangeRad(angle) {
+    angle %= 2 * Math.PI;
+    if (angle < 0) angle += 2 * Math.PI;
+    return angle;
+}
 
-function init() {
-    container = document.getElementById( 'container' );
+function deltaAngleDeg(a, b) {
+    return Math.min(360 - (Math.abs(a - b) % 360), Math.abs(a - b) % 360);
+}
 
-    camera = new THREE.PerspectiveCamera( 60, window.innerWidth / window.innerHeight, 1, 20000 );
-    camera.position.y = getY( worldHalfWidth, worldHalfDepth ) * 100 + 100;
+function deltaAngleRas(a, b) {
+    // todo
+}
 
-    oculusControl = new THREE.DK2Controls( camera );
 
+var scene, camera, controls, projSphere, progBarContainer, progBar, renderer,effect;
+// ----------------------------------------------
+
+function initWebGL() {
+    // create scene
     scene = new THREE.Scene();
-    // sides
-    var matrix = new THREE.Matrix4();
-    var pxGeometry = new THREE.PlaneBufferGeometry( 100, 100 );
-    pxGeometry.attributes.uv.array[ 1 ] = 0.5;
-    pxGeometry.attributes.uv.array[ 3 ] = 0.5;
-    pxGeometry.rotateY( Math.PI / 2 );
-    pxGeometry.translate( 50, 0, 0 );
 
-    var nxGeometry = new THREE.PlaneBufferGeometry( 100, 100 );
-    nxGeometry.attributes.uv.array[ 1 ] = 0.5;
-    nxGeometry.attributes.uv.array[ 3 ] = 0.5;
-    nxGeometry.rotateY( - Math.PI / 2 );
-    nxGeometry.translate( - 50, 0, 0 );
+    // Create camera
+    camera = new THREE.PerspectiveCamera(60, WIDTH / HEIGHT, 0.1, FAR);
+    camera.target = new THREE.Vector3(1, 0, 0);
 
-    var pyGeometry = new THREE.PlaneBufferGeometry( 100, 100 );
-    pyGeometry.attributes.uv.array[ 5 ] = 0.5;
-    pyGeometry.attributes.uv.array[ 7 ] = 0.5;
-    pyGeometry.rotateX( - Math.PI / 2 );
-    pyGeometry.translate( 0, 50, 0 );
+    //controls = new THREE.DK2Controls(camera);
+    controls  = new THREE.VRControls(camera);
 
-    var pzGeometry = new THREE.PlaneBufferGeometry( 100, 100 );
-    pzGeometry.attributes.uv.array[ 1 ] = 0.5;
-    pzGeometry.attributes.uv.array[ 3 ] = 0.5;
-    pzGeometry.translate( 0, 0, 50 );
+    scene.add(camera);
 
-    var nzGeometry = new THREE.PlaneBufferGeometry( 100, 100 );
-    nzGeometry.attributes.uv.array[ 1 ] = 0.5;
-    nzGeometry.attributes.uv.array[ 3 ] = 0.5;
-    nzGeometry.rotateY( Math.PI );
-    nzGeometry.translate( 0, 0, -50 );
-    //
-    // BufferGeometry cannot be merged yet.
-    var tmpGeometry = new THREE.Geometry();
-    var pxTmpGeometry = new THREE.Geometry().fromBufferGeometry( pxGeometry );
-    var nxTmpGeometry = new THREE.Geometry().fromBufferGeometry( nxGeometry );
-    var pyTmpGeometry = new THREE.Geometry().fromBufferGeometry( pyGeometry );
-    var pzTmpGeometry = new THREE.Geometry().fromBufferGeometry( pzGeometry );
-    var nzTmpGeometry = new THREE.Geometry().fromBufferGeometry( nzGeometry );
-    for ( var z = 0; z < worldDepth; z ++ ) {
-        for ( var x = 0; x < worldWidth; x ++ ) {
-            var h = getY( x, z );
-            matrix.makeTranslation(
-                x * 100 - worldHalfWidth * 100,
-                h * 100,
-                z * 100 - worldHalfDepth * 100
-            );
-            var px = getY( x + 1, z );
-            var nx = getY( x - 1, z );
-            var pz = getY( x, z + 1 );
-            var nz = getY( x, z - 1 );
-            tmpGeometry.merge( pyTmpGeometry, matrix );
-            if ( ( px !== h && px !== h + 1 ) || x === 0 ) {
-                tmpGeometry.merge( pxTmpGeometry, matrix );
+    // Add projection sphere
+    projSphere = new THREE.Mesh(new THREE.SphereGeometry(500, 512, 256, 0, Math.PI * 2, 0, Math.PI), new THREE.MeshBasicMaterial({
+        map: THREE.ImageUtils.loadTexture('placeholder.jpg'),
+        side: THREE.DoubleSide
+    }));
+    projSphere.geometry.dynamic = true;
+    scene.add(projSphere);
+
+    // Add Progress Bar
+    progBarContainer = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.2, 0.1), new THREE.MeshBasicMaterial({color: 0xaaaaaa}));
+    progBarContainer.translateZ(-3);
+    camera.add(progBarContainer);
+
+    progBar = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.1, 0.1), new THREE.MeshBasicMaterial({color: 0x0000ff}));
+    progBar.translateZ(0.2);
+    progBarContainer.add(progBar);
+
+    // Create render
+    try {
+        renderer = new THREE.WebGLRenderer();
+    }
+    catch (e) {
+        alert('This application needs WebGL enabled!');
+        return false;
+    }
+
+    renderer.autoClearColor = false;
+    renderer.setSize(WIDTH, HEIGHT);
+
+    effect = new THREE.OculusRiftEffect(renderer, {worldScale: 100});
+    effect.setSize(window.innerWidth, window.innerHeight);
+
+    var viewer = $('#viewer');
+    viewer.append(renderer.domElement);
+}
+
+function initControls() {
+
+    // Keyboard
+    // ---------------------------------------
+    var lastSpaceKeyTime = new Date(),
+        lastCtrlKeyTime = lastSpaceKeyTime;
+
+    $(document).keydown(function (e) {
+        console.log(e.keyCode);
+        switch (e.keyCode) {
+            case 32: // Space
+                var spaceKeyTime = new Date();
+                if (spaceKeyTime - lastSpaceKeyTime < 300) {
+                    $('.ui').toggle(200);
+                }
+                lastSpaceKeyTime = spaceKeyTime;
+                break;
+            case 17: // Ctrl
+                var ctrlKeyTime = new Date();
+                if (ctrlKeyTime - lastCtrlKeyTime < 300) {
+                    moveToNextPlace();
+                }
+                lastCtrlKeyTime = ctrlKeyTime;
+                break;
+            case 18: // Alt
+                USE_DEPTH = !USE_DEPTH;
+                $('#depth').prop('checked', USE_DEPTH);
+                setSphereGeometry();
+                break;
+        }
+    });
+
+    // Mouse
+    // ---------------------------------------
+    var viewer = $('#viewer');
+
+    viewer.dblclick(function () {
+        moveToNextPlace();
+    });
+}
+
+function initGui() {
+    if (!SHOW_SETTINGS) {
+        $('.ui').hide();
+    }
+
+    $('#depth').change(function (event) {
+        USE_DEPTH = $('#depth').is(':checked');
+        setSphereGeometry();
+    });
+
+    window.addEventListener('resize', resize, false);
+
+}
+
+function initPano() {
+    panoLoader = new GSVPANO.PanoLoader();
+    panoDepthLoader = new GSVPANO.PanoDepthLoader();
+    panoLoader.setZoom(QUALITY);
+
+    panoLoader.onProgress = function (progress) {
+        if (progress > 0) {
+            progBar.visible = true;
+            progBar.scale = new THREE.Vector3(progress / 100.0, 1, 1);
+        }
+    };
+    panoLoader.onPanoramaData = function (result) {
+        progBarContainer.visible = true;
+        progBar.visible = false;
+        $('.mapprogress').show();
+    };
+
+    panoLoader.onNoPanoramaData = function (status) {
+        //alert('no data!');
+    };
+
+    panoLoader.onPanoramaLoad = function () {
+        var a = THREE.Math.degToRad(90 - panoLoader.heading);
+        projSphere.quaternion.setFromEuler(new THREE.Euler(0, a, 0, 'YZX'));
+
+        projSphere.material.wireframe = false;
+        projSphere.material.map.needsUpdate = true;
+        projSphere.material.map = new THREE.Texture(this.canvas);
+        projSphere.material.map.needsUpdate = true;
+        centerHeading = panoLoader.heading;
+
+        progBarContainer.visible = false;
+        progBar.visible = false;
+
+        marker.setMap(null);
+        marker = new google.maps.Marker({position: this.location.latLng, map: gmap});
+        marker.setMap(gmap);
+
+        $('.mapprogress').hide();
+
+        if (window.history) {
+            var newUrl = '?lat=' + this.location.latLng.lat() + '&lng=' + this.location.latLng.lng();
+            newUrl += USE_TRACKER ? '&sock=' + escape(WEBSOCKET_ADDR.slice(5)) : '';
+            newUrl += '&q=' + QUALITY;
+            newUrl += '&s=' + $('#settings').is(':visible');
+            newUrl += '&heading=' + currHeading;
+            window.history.pushState('', '', newUrl);
+        }
+
+        panoDepthLoader.load(this.location.pano);
+    };
+
+    panoDepthLoader.onDepthLoad = function () {
+        setSphereGeometry();
+    };
+}
+
+function setSphereGeometry() {
+    var geom = projSphere.geometry;
+    var geomParam = geom.parameters;
+    var depthMap = panoDepthLoader.depthMap.depthMap;
+    var y, x, u, v, radius, i = 0;
+    for (y = 0; y <= geomParam.heightSegments; y++) {
+        for (x = 0; x <= geomParam.widthSegments; x++) {
+            u = x / geomParam.widthSegments;
+            v = y / geomParam.heightSegments;
+
+            radius = USE_DEPTH ? Math.min(depthMap[y * 512 + x], FAR) : 500;
+
+            var vertex = geom.vertices[i];
+            vertex.x = -radius * Math.cos(geomParam.phiStart + u * geomParam.phiLength) * Math.sin(geomParam.thetaStart + v * geomParam.thetaLength);
+            vertex.y = radius * Math.cos(geomParam.thetaStart + v * geomParam.thetaLength);
+            vertex.z = radius * Math.sin(geomParam.phiStart + u * geomParam.phiLength) * Math.sin(geomParam.thetaStart + v * geomParam.thetaLength);
+            i++;
+        }
+    }
+    geom.verticesNeedUpdate = true;
+}
+
+function initGoogleMap() {
+    currentLocation = new google.maps.LatLng(DEFAULT_LOCATION.lat, DEFAULT_LOCATION.lng);
+
+    var mapel = $('#map');
+    mapel.on('mousemove', function (e) {
+        e.stopPropagation();
+    });
+    gmap = new google.maps.Map(mapel[0], {
+        zoom: 14,
+        center: currentLocation,
+        mapTypeId: google.maps.MapTypeId.HYBRID,
+        streetViewControl: false
+    });
+    google.maps.event.addListener(gmap, 'click', function (event) {
+        panoLoader.load(event.latLng);
+    });
+
+    google.maps.event.addListener(gmap, 'center_changed', function (event) {
+    });
+    google.maps.event.addListener(gmap, 'zoom_changed', function (event) {
+    });
+    google.maps.event.addListener(gmap, 'maptypeid_changed', function (event) {
+    });
+
+    svCoverage = new google.maps.StreetViewCoverageLayer();
+    svCoverage.setMap(gmap);
+
+    geocoder = new google.maps.Geocoder();
+
+    $('#mapsearch').change(function () {
+        geocoder.geocode({'address': $('#mapsearch').val()}, function (results, status) {
+            if (status == google.maps.GeocoderStatus.OK) {
+                gmap.setCenter(results[0].geometry.location);
             }
-            if ( ( nx !== h && nx !== h + 1 ) || x === worldWidth - 1 ) {
-                tmpGeometry.merge( nxTmpGeometry, matrix );
-            }
-            if ( ( pz !== h && pz !== h + 1 ) || z === worldDepth - 1 ) {
-                tmpGeometry.merge( pzTmpGeometry, matrix );
-            }
-            if ( ( nz !== h && nz !== h + 1 ) || z === 0 ) {
-                tmpGeometry.merge( nzTmpGeometry, matrix );
-            }
+        });
+    }).on('keydown', function (e) {
+        e.stopPropagation();
+    });
+
+    marker = new google.maps.Marker({position: currentLocation, map: gmap});
+    marker.setMap(gmap);
+}
+
+function moveToNextPlace() {
+    var nextPoint = null;
+    var minDelta = 360;
+    var navList = panoLoader.links;
+    for (var i = 0; i < navList.length; i++) {
+        var delta = deltaAngleDeg(currHeading, navList[i].heading);
+        if (delta < minDelta && delta < NAV_DELTA) {
+            minDelta = delta;
+            nextPoint = navList[i].pano;
         }
     }
 
-    var geometry = new THREE.BufferGeometry().fromGeometry( tmpGeometry );
-    geometry.computeBoundingSphere();
-
-    var texture = THREE.ImageUtils.loadTexture( './js/textures/minecraft/atlas.png' );
-    texture.magFilter = THREE.NearestFilter;
-    texture.minFilter = THREE.LinearMipMapLinearFilter;
-
-    var mesh = new THREE.Mesh( geometry, new THREE.MeshLambertMaterial( { map: texture } ) );
-    scene.add( mesh );
-    var ambientLight = new THREE.AmbientLight( 0xcccccc );
-    scene.add( ambientLight );
-    var directionalLight = new THREE.DirectionalLight( 0xffffff, 2 );
-    directionalLight.position.set( 1, 1, 0.5 ).normalize();
-    scene.add( directionalLight );
-
-    renderer = new THREE.WebGLRenderer();
-    renderer.setClearColor( 0xbfd1e5 );
-    renderer.setPixelRatio( window.devicePixelRatio );
-    renderer.setSize( window.innerWidth, window.innerHeight );
-
-    effect = new THREE.OculusRiftEffect(renderer, { worldScale: 100 });
-    effect.setSize(window.innerWidth, window.innerHeight);
-
-    container.innerHTML = "";
-    container.appendChild( renderer.domElement );
-    stats = new Stats();
-    stats.domElement.style.position = 'absolute';
-    stats.domElement.style.top = '0px';
-    container.appendChild( stats.domElement );
-    //
-    window.addEventListener( 'resize', onWindowResize, false );
-
-}
-
-function onWindowResize() {
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
-
-    effect.setSize(window.innerWidth, window.innerHeight);
-}
-
-function generateHeight( width, height ) {
-    var data = [], perlin = new ImprovedNoise(),
-        size = width * height, quality = 2, z = Math.random() * 100;
-    for ( var j = 0; j < 4; j ++ ) {
-        if ( j === 0 ) for ( var i = 0; i < size; i ++ ) data[ i ] = 0;
-        for ( var i = 0; i < size; i ++ ) {
-            var x = i % width, y = ( i / width ) | 0;
-            data[ i ] += perlin.noise( x / quality, y / quality, z ) * quality;
-        }
-        quality *= 4;
+    if (nextPoint) {
+        panoLoader.load(nextPoint);
     }
-    return data;
 }
-function getY( x, z ) {
-    return ( data[ x + z * worldWidth ] * 0.2 ) | 0;
-}
-//
-function animate() {
-    requestAnimationFrame( animate );
-    render();
-    stats.update();
-}
+
 function render() {
-    oculusControl.update( clock.getDelta() );
-    THREE.AnimationHandler.update( clock.getDelta() * 100 );
-
-    camera.useQuaternion = true;
-    camera.matrixWorldNeedsUpdate = true;
-
     effect.render(scene, camera);
 }
+
+function setUiSize() {
+    var width = window.innerWidth, hwidth = width / 2,
+        height = window.innerHeight;
+
+    var ui = $('#ui-main');
+    var hsize = 0.60, vsize = 0.40, outOffset = 0;
+    ui.css('width', hwidth * hsize);
+    ui.css('left', hwidth - hwidth * hsize / 2);
+    ui.css('height', height * vsize);
+    ui.css('margin-top', height * (1 - vsize) / 2);
+
+}
+
+function resize(event) {
+    WIDTH = window.innerWidth;
+    HEIGHT = window.innerHeight;
+    setUiSize();
+
+    renderer.setSize(WIDTH, HEIGHT);
+    camera.projectionMatrix.makePerspective(60, WIDTH / HEIGHT, 1, 1100);
+}
+
+function loop() {
+    requestAnimationFrame(loop);
+
+    headingVector.setFromQuaternion(camera.quaternion, 'YZX');
+    currHeading = angleRangeDeg(THREE.Math.radToDeg(-headingVector.y));
+
+    controls.update();
+    //controls.update(clock.getDelta());
+
+    // render
+    render();
+}
+
+$(document).ready(function () {
+    WIDTH = window.innerWidth;
+    HEIGHT = window.innerHeight;
+    setUiSize();
+
+    initWebGL();
+    initControls();
+    initGui();
+    initPano();
+    initGoogleMap();
+
+    panoLoader.load(new google.maps.LatLng(DEFAULT_LOCATION.lat, DEFAULT_LOCATION.lng));
+    loop();
+});

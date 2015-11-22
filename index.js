@@ -17,7 +17,9 @@ app.set('port', process.env.PORT || 3000);
 
 app.use(express.static(path.join(__dirname + '/', 'public')));
 app.set('views', path.join(__dirname + '/public/', 'views'));
-app.set('view engine', 'jade');
+
+app.engine('html', require('ejs').renderFile);
+app.set('view engine', 'html');
 
 app.get('/demo', function (req, res) {
     'use strict';
@@ -25,36 +27,6 @@ app.get('/demo', function (req, res) {
         title: 'Home'
     });
 });
-
-
-app.get("/", function (req, res) {
-    res.header('Access-Control-Allow-Origin', '*');
-    res.header('Access-Control-Allow-Methods', 'GET');
-    res.header('Access-Control-Allow-Headers', 'Content-Type');
-
-    res.json({quat: manager.getDeviceQuatSync(), position: manager.getDevicePositionSync()})
-});
-
-app.get("/supported", function (req, res) {
-    res.json(hmd.getSupportedDevices());
-});
-
-app.get("/info", function (req, res) {
-    manager.getDeviceInfo(function (err, deviceInfo) {
-        res.json(deviceInfo);
-    });
-});
-
-app.get("/orientation", function (req, res) {
-    res.header('Access-Control-Allow-Origin', '*');
-    res.header('Access-Control-Allow-Methods', 'GET');
-    res.header('Access-Control-Allow-Headers', 'Content-Type');
-
-    manager.getDeviceOrientation(function (err, deviceOrientation) {
-        res.json(deviceOrientation);
-    });
-});
-
 
 // Attach socket.io listener to the server
 var wss = new WebSocketServer({server: http});
