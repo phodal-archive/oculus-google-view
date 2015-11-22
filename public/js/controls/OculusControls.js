@@ -41,7 +41,7 @@ THREE.OculusControls = function ( object ) {
     };
 
     this.queuePoll = function() {
-        setTimeout(bind(this, this.pollOnce), 10);
+        setTimeout(bind(this, this.pollOnce), 30);
     };
 
     this.update = function( delta ) {

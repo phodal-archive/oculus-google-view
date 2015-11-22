@@ -16,6 +16,7 @@ var currHeading = 0;
 var centerHeading = 0;
 
 var headingVector = new THREE.Euler();
+var clock = new THREE.Clock();
 
 function angleRangeDeg(angle) {
     angle %= 360;
@@ -38,8 +39,7 @@ function initWebGL() {
     camera = new THREE.PerspectiveCamera(60, WIDTH / HEIGHT, 0.1, FAR);
     camera.target = new THREE.Vector3(1, 0, 0);
 
-    //controls = new THREE.DK2Controls(camera);
-    controls  = new THREE.VRControls(camera);
+    controls = new THREE.DK2Controls(camera);
 
     scene.add(camera);
 
@@ -234,8 +234,9 @@ function loop() {
     headingVector.setFromQuaternion(camera.quaternion, 'YZX');
     currHeading = angleRangeDeg(THREE.Math.radToDeg(-headingVector.y));
 
-    controls.update();
-    render();
+    controls.update(clock.getDelta());
+
+    render(scene, camera);
 }
 
 $(document).ready(function () {
