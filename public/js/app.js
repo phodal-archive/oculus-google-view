@@ -4,39 +4,22 @@
  * Google Street View viewer for the Oculus Rift
  */
 
-// Parameters
-// ----------------------------------------------
 var QUALITY = 3;
 var DEFAULT_LOCATION = {lat: 41.902381, lng: 12.465522};
 var USE_TRACKER = false;
-var DEADZONE = 0.2;
-var SHOW_SETTINGS = true;
 var NAV_DELTA = 45;
 var FAR = 1000;
 var USE_DEPTH = true;
-var WORLD_FACTOR = 1.0;
 
-// Globals
-// ----------------------------------------------
 var WIDTH, HEIGHT;
 var currHeading = 0;
 var centerHeading = 0;
-var navList = [];
 
 var headingVector = new THREE.Euler();
-var gamepadMoveVector = new THREE.Vector3();
 
-// Utility function
-// ----------------------------------------------
 function angleRangeDeg(angle) {
     angle %= 360;
     if (angle < 0) angle += 360;
-    return angle;
-}
-
-function angleRangeRad(angle) {
-    angle %= 2 * Math.PI;
-    if (angle < 0) angle += 2 * Math.PI;
     return angle;
 }
 
@@ -44,13 +27,8 @@ function deltaAngleDeg(a, b) {
     return Math.min(360 - (Math.abs(a - b) % 360), Math.abs(a - b) % 360);
 }
 
-function deltaAngleRas(a, b) {
-    // todo
-}
-
-
 var scene, camera, controls, projSphere, progBarContainer, progBar, renderer,effect;
-// ----------------------------------------------
+var panoLoader, panoDepthLoader, marker, currentLocation, gmap, svCoverage, geocoder;
 
 function initWebGL() {
     // create scene
@@ -102,58 +80,11 @@ function initWebGL() {
 }
 
 function initControls() {
-
-    // Keyboard
-    // ---------------------------------------
-    var lastSpaceKeyTime = new Date(),
-        lastCtrlKeyTime = lastSpaceKeyTime;
-
-    $(document).keydown(function (e) {
-        console.log(e.keyCode);
-        switch (e.keyCode) {
-            case 32: // Space
-                var spaceKeyTime = new Date();
-                if (spaceKeyTime - lastSpaceKeyTime < 300) {
-                    $('.ui').toggle(200);
-                }
-                lastSpaceKeyTime = spaceKeyTime;
-                break;
-            case 17: // Ctrl
-                var ctrlKeyTime = new Date();
-                if (ctrlKeyTime - lastCtrlKeyTime < 300) {
-                    moveToNextPlace();
-                }
-                lastCtrlKeyTime = ctrlKeyTime;
-                break;
-            case 18: // Alt
-                USE_DEPTH = !USE_DEPTH;
-                $('#depth').prop('checked', USE_DEPTH);
-                setSphereGeometry();
-                break;
-        }
-    });
-
-    // Mouse
-    // ---------------------------------------
     var viewer = $('#viewer');
 
     viewer.dblclick(function () {
         moveToNextPlace();
     });
-}
-
-function initGui() {
-    if (!SHOW_SETTINGS) {
-        $('.ui').hide();
-    }
-
-    $('#depth').change(function (event) {
-        USE_DEPTH = $('#depth').is(':checked');
-        setSphereGeometry();
-    });
-
-    window.addEventListener('resize', resize, false);
-
 }
 
 function initPano() {
@@ -264,16 +195,6 @@ function initGoogleMap() {
 
     geocoder = new google.maps.Geocoder();
 
-    $('#mapsearch').change(function () {
-        geocoder.geocode({'address': $('#mapsearch').val()}, function (results, status) {
-            if (status == google.maps.GeocoderStatus.OK) {
-                gmap.setCenter(results[0].geometry.location);
-            }
-        });
-    }).on('keydown', function (e) {
-        e.stopPropagation();
-    });
-
     marker = new google.maps.Marker({position: currentLocation, map: gmap});
     marker.setMap(gmap);
 }
@@ -299,23 +220,9 @@ function render() {
     effect.render(scene, camera);
 }
 
-function setUiSize() {
-    var width = window.innerWidth, hwidth = width / 2,
-        height = window.innerHeight;
-
-    var ui = $('#ui-main');
-    var hsize = 0.60, vsize = 0.40, outOffset = 0;
-    ui.css('width', hwidth * hsize);
-    ui.css('left', hwidth - hwidth * hsize / 2);
-    ui.css('height', height * vsize);
-    ui.css('margin-top', height * (1 - vsize) / 2);
-
-}
-
-function resize(event) {
+function resize() {
     WIDTH = window.innerWidth;
     HEIGHT = window.innerHeight;
-    setUiSize();
 
     renderer.setSize(WIDTH, HEIGHT);
     camera.projectionMatrix.makePerspective(60, WIDTH / HEIGHT, 1, 1100);
@@ -328,20 +235,15 @@ function loop() {
     currHeading = angleRangeDeg(THREE.Math.radToDeg(-headingVector.y));
 
     controls.update();
-    //controls.update(clock.getDelta());
-
-    // render
     render();
 }
 
 $(document).ready(function () {
     WIDTH = window.innerWidth;
     HEIGHT = window.innerHeight;
-    setUiSize();
 
     initWebGL();
     initControls();
-    initGui();
     initPano();
     initGoogleMap();
 
